@@ -1,6 +1,6 @@
 import numpy as np 
 import graphviz
-from generate import generate_cqr_data
+
 import matplotlib.pyplot as plt
 
 class Node:
@@ -34,16 +34,13 @@ class ConformalTree:
             Warning("A qunatile was estimated for n_sample=1, increase the min_samples_leaf or reduce the max_depth")
             return(Node(value = y[0])) 
         elif (len(y) <= self.min_samples_leaf) or (self.depth >= self.max_depth):
-            print(f"Stopped because the split results in a child with less than min_samples_leaf: {self.min_samples_leaf}")
-            return Node(value=np.quantile(conformal_scores, 1-self.alpha)) # The node values should be ~1-alpha quantile of the conformal scores
-    
+            return Node(value=np.quantile(conformal_scores, 1-self.alpha)) 
         best_feature, best_split = self._find_best_split(X, y)
 
         Left_mask = X[:,best_feature] <= best_split
         Right_mask = ~Left_mask
 
         if np.sum(Left_mask) < self.min_samples_leaf or np.sum(Right_mask) < self.min_samples_leaf:
-            print(f"Stopped because the split results (left={np.sum(Left_mask)}, right={np.sum(Right_mask)} in a child with less than min_samples_leaf={self.min_samples_leaf}")
             return Node(value=np.quantile(conformal_scores, 1-self.alpha))
 
         left_node = self._build_tree(X[Left_mask,:], y[Left_mask], conformal_scores[Left_mask])
@@ -120,30 +117,34 @@ class ConformalTree:
             return []
         return [node.split_value] + self._get_split_values(node.left) + self._get_split_values(node.right)
 
-        
-def plot_partition(node, x_test, sort_test):
-    if node.value is not None:
-        return
-    plt.axvline(node.split_value, color='black')
-    left_mask = x_test[:,node.feature_index] <= node.split_value
-    right_mask = ~left_mask
-    plot_partition(node.left, x_test[left_mask], sort_test[left_mask])
-    plot_partition(node.right, x_test[right_mask], sort_test[right_mask])
+def ploting_utility(x_test, y_test, model, tree, title):
+    intervals = tree.get_split_values()
+    intervals = np.insert(intervals, 0, x_test.min())
+    intervals = np.append(intervals, x_test.max())
+    
+    predictions = np.squeeze(tree.predict(x_test))
+    lower = predictions[:,0]
+    upper = predictions[:,1]
 
+    sort_test = np.argsort(x_test, axis=0).flatten()
+    plt.figure(figsize=(10,5))
+    plt.scatter(x_test, y_test, color='black')
+    plt.plot(x_test[sort_test], model.predict(x_test[sort_test]), color='blue', label='Model Prediction')
+    plt.fill_between(x_test[sort_test].ravel(), lower[sort_test], upper[sort_test], color='red', alpha=0.5, label='Conformal Prediction')
+    for i in range(len(intervals) - 1):
+        color = 'gray' if i % 2 == 0 else 'white'
+        plt.axvspan(intervals[i], intervals[i+1], color=color, alpha=0.2)
+    plt.title(title)
 
 
 # Example usage
 if __name__ == "__main__":
-    from sklearn.linear_model import LinearRegression, HuberRegressor
-    x_train, y_train, x_cal, y_cal, x_test, y_test = generate_cqr_data(0)
-    # remove extreme values from test
-    x_test = x_test[(y_test > -5) & (y_test < 6)]
-    y_test = y_test[(y_test > -5) & (y_test < 6)]
-    sort_test = np.argsort(x_test, axis=0).ravel()
+    from sklearn.linear_model import HuberRegressor
+    from generate import generate_cqr_data
 
+    x_train, y_train, x_cal, y_cal, x_test, y_test = generate_cqr_data(0)
     model = HuberRegressor()
     model.fit(x_train, y_train)
-
     tree = ConformalTree(alpha=0.95,
                          model=model,
                          min_samples_leaf=10, 
@@ -152,24 +153,7 @@ if __name__ == "__main__":
                          y_cal=y_cal)
     tree.fit(x_cal, y_cal)
     tree.plot_tree()
-    predictions = np.squeeze(tree.predict(x_test))
-    lower = predictions[:,0]
-    upper = predictions[:,1]
-
-
-    intervals = tree.get_split_values()
-    intervals = np.insert(intervals, 0, 0)
-    intervals = np.append(intervals, 5)
-
-    sort_test = np.argsort(x_test, axis=0).flatten()
-
-    plt.figure(figsize=(10,5))
-    plt.scatter(x_test, y_test, color='black')
-    plt.plot(x_test[sort_test], model.predict(x_test[sort_test]), color='blue', label='Model Prediction')
-    plt.fill_between(x_test[sort_test].ravel(), lower[sort_test], upper[sort_test], color='red', alpha=0.5, label='Conformal Prediction')
-    for i in range(len(intervals) - 1):
-        color = 'gray' if i % 2 == 0 else 'white'
-        plt.axvspan(intervals[i], intervals[i+1], color=color, alpha=0.2)
-    plt.title('Model Prediction')
+    ploting_utility(x_test, y_test, model, tree, 'Model Prediction')
+    plt.ylim(-5, 10)
     plt.show()
     print("Done!")
